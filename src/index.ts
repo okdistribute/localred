@@ -79,6 +79,7 @@ export class LocalRed {
       emitter.emit('error')
     })
     client.on('update', (changes: Automerge.BinaryChange[]) => {
+      // TODO: actually emit 'message' for each new message
       let msg = client.document.messages[0]
       emitter.emit('message', msg)
     })
