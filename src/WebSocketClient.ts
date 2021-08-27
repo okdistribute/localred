@@ -7,11 +7,13 @@ export default class Client<T> extends events.EventEmitter {
   syncState: Automerge.SyncState
   client: WebSocket
   documentId: string
+  port: number
   document: Automerge.Doc<T>
 
-  constructor(documentId: string, document: Automerge.Doc<T>, publish = false) {
+  constructor(documentId: string, document: Automerge.Doc<T>, port = 8080, publish = false) {
     super()
     this.document = document
+    this.port = port
 
     if (publish) {
       this.documentId = documentId
@@ -30,7 +32,7 @@ export default class Client<T> extends events.EventEmitter {
   _createClient(): WebSocket {
     this.syncState = Automerge.initSyncState()
     this.client = new WebSocket(
-      `ws://localhost:8080/${this.documentId}`,
+      `ws://localhost:${this.port}/${this.documentId}`,
       'echo-protocol'
     )
     this.client.binaryType = 'arraybuffer'
