@@ -15,12 +15,13 @@ export default function start(dbname: string): LocalRed {
   return instance
 }
 
-export class LocalRed {
+export class LocalRed extends events.EventEmitter {
   rooms = new Map<string, Client<Room>>()
   idb: DB
   changeQueue = new Map <string, Automerge.BinaryChange[]> ()
 
   constructor(dbname: string) {
+    super()
     this.idb = new DB(dbname)
   }
 
@@ -33,11 +34,11 @@ export class LocalRed {
 
   _createClient(roomName: string, room: Room): Client<Room> {
     let newClient = new Client(roomName, room)
-    newClient.on('update', (changes: Automerge.BinaryChange[]) => {
-      console.log('saving', changes.length, 'changes')
-      this.save(newClient.document, changes).then(() => {
-        console.log('Saved')
-      })
+    newClient.on('open', () => {
+      this.emit('open')
+    })
+    newClient.on('error', () => {
+      this.emit('error')
     })
     this.rooms.set(roomName, newClient)
     return newClient
@@ -68,23 +69,6 @@ export class LocalRed {
     this.rooms.delete(roomName)
   }
 
-  watch(roomName: string): events.EventEmitter {
-    const emitter = new events.EventEmitter()
-    const client = this._get(roomName)
-    if (client.open) emitter.emit('open')
-    client.once('open', () => {
-      emitter.emit('open')
-    })
-    client.on('error', () => {
-      emitter.emit('error')
-    })
-    client.on('update', (changes: Automerge.BinaryChange[]) => {
-      let msg = client.document.messages[0]
-      emitter.emit('message', msg)
-    })
-    return emitter
-  }
-
   _create(name: string): Room {
     const head = Automerge.change(
       Automerge.init<Room>('0000'),
@@ -100,10 +84,10 @@ export class LocalRed {
     return room
   }
 
-  async save(room: Room, changes: Automerge.BinaryChange[]): Promise<string[]> {
+  async save(name: string, changes: Automerge.BinaryChange[]): Promise<string[]> {
     const tasks: Promise<string>[] = []
     changes.forEach((change) => {
-      tasks.push(this.idb.storeChange(room.name, change))
+      tasks.push(this.idb.storeChange(name, change))
     })
     return Promise.all(tasks)
   }
@@ -111,11 +95,30 @@ export class LocalRed {
   async load(name: string): Promise<Room> {
     const doc = await this.idb.getDoc(name)
     if (!doc) return this._create(name)
+    let observable = new Automerge.Observable()
     const state = doc.serializedDoc
-      ? Automerge.load<Room>(doc.serializedDoc)
+      ? Automerge.load<Room>(doc.serializedDoc, {observable})
       : this._create(name)
     const [room] = Automerge.applyChanges(state, doc.changes);
-    this.rooms.set(name, this._createClient(name, room))
+    observable.observe(room, (diff: Automerge.MapDiff | Automerge.ListDiff | Automerge.ValueDiff, before: Room, after: Room, local: boolean, changes: Automerge.BinaryChange[]) => {
+      console.log('patch!')
+      //@ts-ignore
+      if (diff.props && diff.props.messages) {
+        //@ts-ignore
+        let opId = Object.values(diff.props.messages)[0]
+        //@ts-ignore
+        opId.edits.forEach(edit => {
+          this.emit('message', name, edit.value)
+        })
+      }
+      if (changes.length) {
+        console.log('saving changes', changes.length)
+        this.save(name, changes).then(() => {
+          console.log('Saved')
+        })
+      }
+    })
+    this._createClient(name, room)
     return room
   }
 
